@@ -95,7 +95,6 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
-    op.create_index("ix_users_tenant_id", "users", ["tenant_id"])
     op.create_index("ix_users_email", "users", ["email"], unique=True)
     op.create_index("ix_users_phone_number", "users", ["phone_number"], unique=True)
 
