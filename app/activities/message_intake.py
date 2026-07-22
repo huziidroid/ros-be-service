@@ -1,0 +1,36 @@
+"""
+Message intake activities.
+
+log_message emits a structured log event for each inbound message — the
+only activity MessageIntakeWorkflow calls today (Phase 1). Later phases add
+classify_message, extract_order, resolve_products, and send_confirmation.
+"""
+
+import logging
+
+from temporalio import activity
+
+from app.schemas.workflows.message_intake import MessageIntakeInput
+
+
+logger = logging.getLogger(__name__)
+
+
+@activity.defn
+async def log_message(inp: MessageIntakeInput) -> None:
+    """Emit a structured log event for the inbound message."""
+    # Do NOT log message content (text_body) or the raw sender number at INFO —
+    # that is customer PII / business data. Log identifiers and metadata only.
+    logger.info(
+        "message_intake_activity",
+        extra={
+            "wamid": inp.wamid,
+            "message_type": inp.message_type,
+            "phone_number_id": inp.phone_number_id,
+            "has_text": inp.text_body is not None,
+            "text_len": len(inp.text_body) if inp.text_body else 0,
+            "has_media": inp.media_id is not None,
+            "timestamp": inp.timestamp,
+            "tenant_waba_id": inp.tenant_waba_id,
+        },
+    )
