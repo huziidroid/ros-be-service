@@ -372,6 +372,69 @@ async def send_text_message(
     return data
 
 
+async def send_authentication_template(
+    phone_number_id: str,
+    to: str,
+    *,
+    template_name: str,
+    language: str,
+    code: str,
+) -> dict[str, Any]:
+    """
+    Send an OTP via an approved AUTHENTICATION-category template with a
+    copy-code button. Unlike free-form text, a template delivers to any
+    recipient without needing an open 24-hour customer-service window.
+
+    Meta requires the code twice: once as the body variable and once as the
+    copy-code button's `coupon_code`.
+
+    Meta endpoint:
+      POST /{phone_number_id}/messages
+        Authorization: Bearer SYSTEM_USER_TOKEN
+
+    `to` must be a full E.164 number without the '+' prefix.
+    Returns the raw Meta response {messages: [{id}], contacts: [...]}.
+    """
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": language},
+            "components": [
+                {"type": "body", "parameters": [{"type": "text", "text": code}]},
+                {
+                    "type": "button",
+                    "sub_type": "copy_code",
+                    "index": "0",
+                    "parameters": [{"type": "coupon_code", "coupon_code": code}],
+                },
+            ],
+        },
+    }
+    async with _build_client() as client:
+        response = await client.post(
+            f"/{phone_number_id}/messages",
+            headers={
+                "Authorization": f"Bearer {settings.whatsapp_system_user_token.get_secret_value()}"
+            },
+            json=payload,
+        )
+    data = _raise_for_status(response)
+    msg_id = data.get("messages", [{}])[0].get("id", "unknown")
+    logger.info(
+        "template_message_sent",
+        extra={
+            "phone_number_id": phone_number_id,
+            "to": to,
+            "template": template_name,
+            "message_id": msg_id,
+        },
+    )
+    return data
+
+
 async def send_interactive_message(
     phone_number_id: str,
     to: str,

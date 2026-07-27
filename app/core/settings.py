@@ -79,6 +79,15 @@ class Settings(BaseSettings):
     whatsapp_otp_sender_phone_number_id: str = Field(
         alias="WHATSAPP_OTP_SENDER_PHONE_NUMBER_ID"
     )
+    # Approved AUTHENTICATION template used to deliver OTP codes in production.
+    # When unset, app/services/otp.py falls back to free-form text (which only
+    # delivers inside a 24h session — fine for dev on the test number).
+    whatsapp_otp_template_name: str | None = Field(
+        default=None, alias="WHATSAPP_OTP_TEMPLATE_NAME"
+    )
+    whatsapp_otp_template_language: str = Field(
+        default="en_US", alias="WHATSAPP_OTP_TEMPLATE_LANGUAGE"
+    )
 
     @property
     def whatsapp_api_base(self) -> str:

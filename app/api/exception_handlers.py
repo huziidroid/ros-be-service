@@ -6,6 +6,7 @@ returns the standard APIResponse envelope; clients never see a bare
 
 Handlers (most specific first):
   AppError                 → its own status_code + client-safe message
+  WhatsAppAPIError          → 502, upstream messaging provider failed
   RateLimitExceeded         → 429, same message as AppError's RateLimitedError
   StarletteHTTPException   → status_code + detail
   RequestValidationError   → 422 with a flattened field summary
@@ -20,7 +21,8 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.core.exceptions import AppError, RateLimitedError
+from app.clients.whatsapp import WhatsAppAPIError
+from app.core.exceptions import AppError, RateLimitedError, UpstreamError
 from app.schemas.response import err
 
 
@@ -48,6 +50,25 @@ def register_exception_handlers(app: FastAPI) -> None:
             },
         )
         return _envelope(exc.status_code, exc.message)
+
+    @app.exception_handler(WhatsAppAPIError)
+    async def whatsapp_api_error_handler(
+        request: Request, exc: WhatsAppAPIError
+    ) -> JSONResponse:
+        # A non-2xx from Meta's Graph API — our upstream failed, so this is a
+        # 502, not a 500. Log Meta's real status/body; return a safe message.
+        logger.error(
+            "whatsapp_upstream_error",
+            extra={
+                "meta_status": exc.status_code,
+                "detail": str(exc),
+                "path": request.url.path,
+            },
+        )
+        return _envelope(
+            UpstreamError.status_code,
+            "Couldn't send the WhatsApp message right now. Please try again.",
+        )
 
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_exceeded_handler(
