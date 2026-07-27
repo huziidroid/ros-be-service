@@ -1,20 +1,8 @@
 """
-Standard API response envelope.
+Standard API response envelope — APIResponse[T]:
+  {status_code, status: "success"|"error", message, data}
 
-Every endpoint returns APIResponse[T]:
-  {
-    "status_code": 200,
-    "status":      "success" | "error",
-    "message":     "Human-readable summary",
-    "data":        <payload> | null
-  }
-
-Usage in route handlers:
-  return ok(data=MySchema(...), message="Created.")
-  return ok(data=MySchema(...), message="Created.", status_code=201)
-
-Global exception handlers (app/api/exception_handlers.py) map HTTPException
-and validation errors to this same shape.
+`status` is derived from status_code; build with ok() / err() / respond().
 """
 
 from __future__ import annotations
@@ -36,11 +24,7 @@ class ResponseStatus(StrEnum):
 
 
 class APIResponse(BaseModel, Generic[T]):
-    """
-    Generic response envelope used by every endpoint.
-
-    Type parameter T narrows the shape of `data` in generated OpenAPI docs.
-    """
+    """Generic response envelope; T narrows `data` in the OpenAPI docs."""
 
     status_code: int
     status: ResponseStatus
@@ -48,9 +32,7 @@ class APIResponse(BaseModel, Generic[T]):
     data: T | None = None
 
 
-# ---------------------------------------------------------------------------
-# Constructor helpers — use these in route handlers
-# ---------------------------------------------------------------------------
+# --- Constructor helpers ---
 
 
 def respond(
@@ -59,10 +41,7 @@ def respond(
     message: str,
     data: Any = None,
 ) -> APIResponse[Any]:
-    """
-    Build an envelope, deriving `status` from `status_code` — callers never
-    set "success"/"error" by hand, so the two can't disagree.
-    """
+    """Build an envelope, deriving `status` from `status_code`."""
     status = ResponseStatus.SUCCESS if status_code < 400 else ResponseStatus.ERROR
     return APIResponse(
         status_code=status_code, status=status, message=message, data=data

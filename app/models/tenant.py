@@ -1,17 +1,8 @@
 """
 Tenant model — root entity for every distributor business.
 
-A Tenant is created at signup (see app/services/auth.py), before any
-WhatsApp connection exists — waba_id is NULL until the distributor
-completes the optional, authenticated WhatsApp connect step
-(app/api/v1/auth/whatsapp.py). Other models (Contact, Order, Message, etc.)
-reference tenant_id → tenants.id.
-
-phone_number_id is the webhook routing key Meta includes on every inbound
-message. It can be NULL — no WABA connected yet, a FINISH_ONLY_WABA signup,
-or a failed phone registration all leave it unset; onboarding_status (see
-app.schemas.workflows.tenant_onboarding.OnboardingStatus) distinguishes
-these states.
+Created at signup, before any WhatsApp connection (waba_id/phone_number_id NULL
+until the optional connect step); onboarding_status tracks the state.
 """
 
 import uuid
@@ -36,11 +27,8 @@ class Tenant(Base):
         default=uuid.uuid4,
     )
 
-    # Meta identifiers
-    # unique=True intentionally omitted on both columns below: uniqueness is
-    # enforced by a partial index (unique among is_active rows only — see
-    # migration 0005), not by SQLAlchemy column metadata, so a deactivated
-    # tenant doesn't permanently block reconnecting the same WABA/number.
+    # Meta identifiers — uniqueness enforced by a partial index over active
+    # rows (migration 0005), not column metadata.
     waba_id: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
@@ -77,9 +65,7 @@ class Tenant(Base):
         SAEnum(
             OnboardingStatus,
             name="onboarding_status",
-            # Bind the enum's lowercase .value ("not_connected"), matching the
-            # Postgres type's labels — without this SQLAlchemy binds the member
-            # name ("NOT_CONNECTED") and the insert fails.
+            # Bind the enum's lowercase .value, matching the Postgres labels.
             values_callable=lambda enum: [member.value for member in enum],
         ),
         nullable=False,

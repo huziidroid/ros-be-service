@@ -1,24 +1,8 @@
 """
-Auth service — orchestrates signup, login, and token refresh.
-
-Two independent ways to prove identity: OTP over WhatsApp, or email +
-password. Both converge on the same Tenant+User creation and token
-issuance, so that part lives once here rather than duplicated per method.
-
-OTP has a single request/verify pair for both signup and login — whether a
-phone number is signing up or logging in is decided here (by whether
-UserRepo already has that number), not by which endpoint the client calls.
-See app.services.otp for the underlying Redis-backed code generation/
-storage/delivery, imported qualified below to keep that distinction
-visible: otp.request_otp/otp.verify_otp are the low-level primitives;
-request_otp/verify_otp in this module are what the router actually calls.
-
-Every write here happens inside one DB transaction (create_pending +
-UserRepo.create share the same AsyncSession, committed together) — either
-both the Tenant and its owner User exist, or neither does. Concurrent
-signups for the same phone/email are caught by the DB's unique constraint
-(migration 0003) and translated to a clean ConflictError instead of a raw
-IntegrityError.
+Auth service — orchestrates signup, login, and token refresh over two identity
+methods (WhatsApp OTP and email + password), both converging on one Tenant+User
+creation and token issuance. Writes run in a single transaction; duplicate
+email/phone races surface as ConflictError.
 """
 
 import logging
@@ -90,12 +74,7 @@ async def _create_tenant_and_owner(
     phone_number: str | None = None,
     password_hash: str | None = None,
 ) -> User:
-    """
-    Create a Tenant + its owner User in one transaction.
-
-    Raises ConflictError if a concurrent request already claimed the same
-    email/phone_number (race between the caller's pre-check and this write).
-    """
+    """Create a Tenant + owner User in one transaction; ConflictError on a duplicate race."""
     try:
         tenant = await TenantRepo(session).create_pending(display_name=business_name)
         user = await UserRepo(session).create(
@@ -116,19 +95,13 @@ async def _create_tenant_and_owner(
     return user
 
 
-# ---------------------------------------------------------------------------
-# OTP — one request/verify pair covering both signup and login
-# ---------------------------------------------------------------------------
+# --- OTP: one request/verify pair covering both signup and login ---
 
 
 async def request_otp(
     session: AsyncSession, redis: RedisClient, body: OtpRequestBody
 ) -> OtpRequestedData:
-    """
-    Send a WhatsApp OTP. A registered phone number gets a login code; an
-    unregistered one gets a signup code — the caller doesn't declare which,
-    it's decided by whether UserRepo already knows this number.
-    """
+    """Send a WhatsApp OTP; a registered number gets a login code, a new one a signup code."""
     existing = await UserRepo(session).get_by_phone_number(body.phone_number)
 
     pending = None
@@ -154,11 +127,7 @@ async def request_otp(
 async def verify_otp(
     session: AsyncSession, redis: RedisClient, body: OtpVerifyRequestBody
 ) -> AuthResult:
-    """
-    Verify a code. Pending signup data attached to it means this number was
-    new at request time, so a Tenant + owner User get created now;
-    otherwise this completes a login for an existing User.
-    """
+    """Verify a code; pending signup data creates the Tenant+User, else completes a login."""
     pending = await otp.verify_otp(
         redis, phone_number=body.phone_number, code=body.code
     )
@@ -176,15 +145,13 @@ async def verify_otp(
 
     login_user = await UserRepo(session).get_by_phone_number(body.phone_number)
     if login_user is None:
-        # Account was deleted/deactivated between OTP request and verify.
+        # Account deleted/deactivated between OTP request and verify.
         raise UnprocessableError("No account found for this number.")
     logger.info("login_otp_completed", extra={"user_id": str(login_user.id)})
     return _build_auth_result(login_user)
 
 
-# ---------------------------------------------------------------------------
-# Email + password
-# ---------------------------------------------------------------------------
+# --- Email + password ---
 
 
 async def signup_with_email(
@@ -212,8 +179,7 @@ async def login_with_email(
     session: AsyncSession, body: EmailLoginRequestBody
 ) -> AuthResult:
     user = await UserRepo(session).get_by_email(body.email)
-    # Same error for "no such user" and "wrong password" — don't help an
-    # attacker enumerate registered emails.
+    # Same error for unknown user and wrong password — don't leak which emails exist.
     if (
         user is None
         or user.password_hash is None
@@ -225,9 +191,7 @@ async def login_with_email(
     return _build_auth_result(user)
 
 
-# ---------------------------------------------------------------------------
-# Token refresh
-# ---------------------------------------------------------------------------
+# --- Token refresh ---
 
 
 async def refresh_tokens(session: AsyncSession, body: RefreshRequestBody) -> TokenPair:

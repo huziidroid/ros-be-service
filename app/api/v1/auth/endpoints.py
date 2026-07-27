@@ -1,9 +1,4 @@
-"""
-Auth endpoint handlers. Decorator-free — the HTTP metadata (path, method,
-status, summary) lives in `router.py`, which registers these with
-`add_api_route`. Cross-cutting behaviour that must wrap the handler (slowapi
-rate limiting) stays here on the function.
-"""
+"""Auth endpoint handlers. Decorator-free — HTTP metadata lives in `router.py`."""
 
 import logging
 
@@ -46,10 +41,7 @@ from app.services.onboarding import run_tenant_onboarding
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# OTP (phone/WhatsApp) — one request/verify pair. See app/services/auth.py for
-# how a phone number is routed to signup vs login without the client declaring.
-# ---------------------------------------------------------------------------
+# --- OTP (phone/WhatsApp) ---
 
 
 @limiter.limit(settings.rate_limit_otp_request)
@@ -71,9 +63,7 @@ async def verify(
     return ok(data=data, message="Success.")
 
 
-# ---------------------------------------------------------------------------
-# Email + password
-# ---------------------------------------------------------------------------
+# --- Email + password ---
 
 
 @limiter.limit(settings.rate_limit_email_signup)
@@ -117,9 +107,7 @@ async def me(current_user: CurrentUserDep) -> APIResponse[UserSummary]:
     return ok(data=data)
 
 
-# ---------------------------------------------------------------------------
-# WhatsApp Embedded Signup callback — the "connect WhatsApp" step.
-# ---------------------------------------------------------------------------
+# --- WhatsApp Embedded Signup callback ---
 
 
 async def embedded_signup_callback(
@@ -128,17 +116,9 @@ async def embedded_signup_callback(
     current_user: CurrentUserDep,
 ) -> APIResponse[TenantOnboardingData]:
     """
-    Authenticated, optional step performed after signup — not part of login.
-    The tenant row already exists; the workflow attaches the WABA to it.
-
-    Frontend POSTs the short-lived Embedded Signup `code` plus the
-    WA_EMBEDDED_SIGNUP session event, with the distributor's own access token.
-    If the event shows the flow didn't succeed (or there's no code), we log and
-    return without calling Meta. Otherwise the onboarding service runs
-    TenantOnboardingWorkflow synchronously — exchange the code, select the WABA,
-    share the Solution Partner credit line, register the primary phone number,
-    and attach the WABA to the caller's tenant — and we return the updated
-    tenant summary.
+    Authenticated post-signup step. If the flow didn't complete (or has no code),
+    log and return; otherwise run TenantOnboardingWorkflow synchronously and
+    return the updated tenant summary.
     """
     if not body.code:
         logger.info(

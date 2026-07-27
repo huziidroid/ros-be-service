@@ -1,29 +1,12 @@
 """
-OTP service — generates, stores, sends, and verifies login/signup codes.
-The only place login/signup OTP state lives before it's either consumed
-(signup/login succeeds) or expires unused.
+OTP service — generate, store, send, and verify login/signup codes.
 
-One code per phone number, not split by signup/login purpose: the two
-can't collide, because request_otp's callers (app/services/auth.py) only
-ever request a signup code for an unregistered phone and a login code for
-a registered one — the phone's registration status already keeps them
-mutually exclusive, so there's nothing extra to namespace against.
+All state lives in Redis with a TTL; for signup, the pending name fields ride
+alongside the code hash so verify only needs {phone_number, code}.
 
-Nothing here is a system of record: every Redis key carries a TTL
-(settings.otp_expire_seconds) and is safe to lose. For signup specifically,
-the pending business_name/first_name/last_name travel alongside the code
-hash under the same key, so POST /auth/otp/verify only needs
-{phone_number, code} — no second round-trip to re-collect the form data.
-
-Codes are sent over WhatsApp using Retail OS's own platform phone number
-(settings.whatsapp_otp_sender_phone_number_id) — a distributor has no WABA
-of their own until after they sign up, so the code can't go out from a
-tenant-owned number the way ordinary business messaging does.
-
-Key layout:
+Keys:
   otp:{phone_number}          — code hash, attempts, pending signup data
-  otp:cooldown:{phone_number} — presence-only marker for resend throttling;
-                                 value is unused
+  otp:cooldown:{phone_number} — resend throttle marker (value unused)
 """
 
 import json
@@ -51,7 +34,7 @@ class PendingSignup:
 class _OTPRecord:
     code_hash: str
     attempts: int
-    pending: dict[str, str] | None  # PendingSignup.__dict__, or None for login
+    pending: dict[str, str] | None  # PendingSignup fields, or None for login
 
 
 def _otp_key(phone_number: str) -> str:
@@ -69,12 +52,8 @@ async def request_otp(
     pending: PendingSignup | None = None,
 ) -> None:
     """
-    Generate a code, send it to the user over WhatsApp, then store its hash
-    (+ any pending signup data) in Redis. Sending first means a delivery
-    failure persists nothing, so the user isn't throttled without a code.
-
-    Raises RateLimitedError if called again before the resend cooldown
-    (settings.otp_resend_cooldown_seconds) elapses for this phone number.
+    Generate a code, send it over WhatsApp, then store its hash. Send-first so a
+    delivery failure persists nothing. RateLimitedError within the resend cooldown.
     """
     if await redis.exists(_cooldown_key(phone_number)):
         raise RateLimitedError(
@@ -88,14 +67,10 @@ async def request_otp(
         pending=asdict(pending) if pending is not None else None,
     )
 
-    # Send first: if WhatsApp delivery fails this raises before anything is
-    # persisted, so the user isn't throttled with no code and can retry.
-    # phone_number is our stored/display E.164 format (leading '+'); the
-    # Cloud API `to` field wants it without the '+'.
+    # Cloud API `to` wants the E.164 number without the leading '+'.
     to = phone_number.lstrip("+")
     if settings.whatsapp_otp_template_name:
-        # Production: an approved AUTHENTICATION template — delivers without a
-        # 24h session, unlike free-form text.
+        # Production: template delivers without a 24h session.
         await send_authentication_template(
             phone_number_id=settings.whatsapp_otp_sender_phone_number_id,
             to=to,
@@ -104,8 +79,7 @@ async def request_otp(
             code=code,
         )
     else:
-        # Dev/test fallback: free-form text (only delivers inside a 24h
-        # session — fine for the test number).
+        # Dev fallback: free-form text (delivers only inside a 24h session).
         minutes = settings.otp_expire_seconds // 60
         await send_text_message(
             phone_number_id=settings.whatsapp_otp_sender_phone_number_id,
@@ -134,13 +108,9 @@ async def verify_otp(
     code: str,
 ) -> PendingSignup | None:
     """
-    Verify a submitted code against the stored hash.
-
-    On success, deletes the key (single-use — a code can't be replayed) and
-    returns the pending signup data, if any (None means this was a login).
-
-    Raises UnprocessableError if the code is missing/expired, wrong, or the
-    max attempt count has been exceeded.
+    Verify a code against the stored hash; on success delete it (single-use) and
+    return any pending signup data (None = login). UnprocessableError if the code
+    is missing/expired, wrong, or the attempt limit is exceeded.
     """
     key = _otp_key(phone_number)
     raw = await redis.get(key)

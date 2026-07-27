@@ -1,22 +1,8 @@
 """
 Tenant onboarding activities.
 
-Each activity wraps a call to app/clients/whatsapp.py, translates
-WhatsAppAPIError into a Temporal ApplicationError, and returns a typed
-result. Ordering and flow decisions stay in the workflow.
-
-Idempotency:
-- exchange_code: not retried (RetryPolicy(maximum_attempts=1)) — Meta codes
-  are single-use. Workflow ID = tenant-onboarding-{code} prevents re-runs.
-- subscribe_waba_webhook: safe to retry — duplicate subscriptions are no-ops.
-- fetch_*: read-only, naturally idempotent.
-- register_phone_number: safe to retry — each attempt sets a new PIN, so the
-  number ends up with whichever PIN the last successful attempt used.
-- share_credit_line: safe to retry; non-fatal in the workflow, so
-  allocation_config_id just stays unset until retried out-of-band.
-- register_tenant: updates the caller's tenant row by tenant_id (not an
-  upsert — the row already exists from signup), naturally idempotent for
-  retries of the same tenant_id/waba_id pair.
+Each wraps a call to app/clients/whatsapp.py, translating WhatsAppAPIError into
+a Temporal ApplicationError. Ordering and flow decisions live in the workflow.
 """
 
 import logging
@@ -77,11 +63,7 @@ async def fetch_waba_accounts(user_token: str) -> list[WABAInfo]:
 
 @activity.defn
 async def select_primary_waba(inp: SelectPrimaryWabaInput) -> WABAInfo:
-    """
-    Choose which WABA to onboard — pure selection, no I/O (see
-    app.domain.onboarding). Embedded Signup v4 supports multi-WABA flows, so
-    this can't be a blind [0].
-    """
+    """Choose which WABA to onboard (pure selection; supports multi-WABA flows)."""
     from app.domain.onboarding import select_primary_waba as _select
 
     return _select(inp.waba_accounts, inp.preferred_waba_id)
@@ -89,12 +71,7 @@ async def select_primary_waba(inp: SelectPrimaryWabaInput) -> WABAInfo:
 
 @activity.defn
 async def assign_system_user(inp: AssignSystemUserInput) -> bool:
-    """
-    Grant the platform System User access to the tenant's WABA, using the
-    short-lived Embedded Signup token. Also a prerequisite for
-    share_credit_line — Meta requires System User access before a credit
-    line can be shared.
-    """
+    """Grant the System User access to the tenant's WABA (prerequisite for share_credit_line)."""
     from app.clients.whatsapp import WhatsAppAPIError
     from app.clients.whatsapp import assign_system_user as _assign
 
@@ -147,17 +124,9 @@ async def fetch_phone_numbers(inp: FetchPhoneNumbersInput) -> list[PhoneNumberIn
 @activity.defn
 async def register_phone_number(inp: RegisterPhoneNumberInput) -> str:
     """
-    Register the tenant's phone number for Cloud API use.
-
-    Generates a fresh two-step PIN, registers it with Meta, then encrypts it
-    before returning — the plaintext PIN never leaves this activity or lands
-    in Temporal's workflow history.
-
-    Falls back to the platform System User token when inp.user_token is
-    None (reconciliation calls this without one — see
-    app.workflows.tenant_reconciliation). Meta's Register API accepts a
-    System User token with whatsapp_business_management +
-    whatsapp_business_messaging permissions.
+    Register the number for Cloud API use; returns the encrypted two-step PIN
+    (plaintext never leaves this activity). Falls back to the System User token
+    when inp.user_token is None (reconciliation).
     """
     from app.clients.whatsapp import WhatsAppAPIError
     from app.clients.whatsapp import register_phone_number as _register
@@ -178,12 +147,7 @@ async def register_phone_number(inp: RegisterPhoneNumberInput) -> str:
 
 @activity.defn
 async def share_credit_line(inp: ShareCreditLineInput) -> str | None:
-    """
-    Share Retail OS's extended credit line with the tenant's WABA.
-
-    Returns allocation_config_id on success, or None if the call failed
-    (logged, not raised — this step is non-fatal).
-    """
+    """Share Retail OS's credit line; returns allocation_config_id, or None on failure (non-fatal)."""
     from app.clients.whatsapp import WhatsAppAPIError
     from app.clients.whatsapp import share_credit_line as _share
 
@@ -200,14 +164,7 @@ async def share_credit_line(inp: ShareCreditLineInput) -> str | None:
 
 @activity.defn
 async def send_test_message(phone_number_id: str) -> bool:
-    """
-    Optional post-registration smoke test — sends a short text from the
-    newly registered number to settings.whatsapp_test_recipient_number.
-
-    Skipped if no recipient is configured. Non-fatal on failure: a brand
-    new number has no open 24-hour customer-service window yet, so a
-    failed send here doesn't indicate a broken registration.
-    """
+    """Optional post-registration smoke test; skipped if no recipient, non-fatal on failure."""
     from app.core.settings import settings
 
     if not settings.whatsapp_test_recipient_number:
@@ -233,13 +190,9 @@ async def send_test_message(phone_number_id: str) -> bool:
 @activity.defn
 async def register_tenant(inp: RegisterTenantInput) -> TenantOnboardingResult:
     """
-    Attach the WABA to the caller's existing tenant row (created at signup)
-    and return the result.
-
-    Raises ApplicationError(type="TENANT_CONFLICT") if the WABA or phone
-    number is already connected to a different tenant — TenantRepo.attach_waba
-    pre-checks both and also guards the concurrent-request race, so this
-    never leaks a raw IntegrityError to the workflow caller.
+    Attach the WABA to the caller's existing tenant row and return the result.
+    ApplicationError(TENANT_CONFLICT) if the WABA/number is already connected
+    to a different tenant.
     """
     from uuid import UUID
 

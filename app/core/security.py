@@ -1,20 +1,4 @@
-"""
-Security primitives — encryption, password hashing, JWTs, and OTP codes.
-Everything here is either a keyed crypto operation or something that
-directly protects one (random generation for a code that gets hashed).
-
-Sections:
-  PIN encryption   — Fernet, symmetric, decryptable (the WhatsApp two-step
-                      PIN needs to be sent to Meta in plaintext later).
-  Password hashing — Argon2id, one-way (User.password_hash).
-  JWTs             — access + refresh tokens, Bearer-header delivery.
-  OTP codes        — random N-digit codes + one-way hash for Redis storage
-                      (app/services/otp.py). SHA-256 is enough here,
-                      not Argon2: the code is single-use, expires in
-                      minutes, and attempts are rate-limited by the caller
-                      — there's no long-term secret to protect against
-                      offline brute force the way a password hash needs to.
-"""
+"""Security primitives: PIN encryption, password hashing, JWTs, and OTP codes."""
 
 import base64
 import hashlib
@@ -34,21 +18,8 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from app.core.settings import settings
 
 
-# ---------------------------------------------------------------------------
-# PIN encryption — currently the WhatsApp two-step PIN
-# (app/domain/onboarding.py, app/activities/tenant_onboarding.py)
-# ---------------------------------------------------------------------------
-#
-# Uses Fernet (AES-128-CBC + HMAC-SHA256), keyed from settings.pin_encryption_key,
-# kept separate from secret_key so the two can be rotated independently.
-# Fernet is symmetric and reversible, which the PIN requires (it goes back
-# to Meta in plaintext on registration), and its API handles IV generation
-# and authentication internally.
-#
-# The 32-byte Fernet key is derived via HKDF (RFC 5869) from
-# PIN_ENCRYPTION_KEY, with info=b"pin_encryption" for domain separation —
-# any other key derived from PIN_ENCRYPTION_KEY elsewhere, with a different
-# info value, is guaranteed unrelated to this one.
+# --- PIN encryption (WhatsApp two-step PIN): Fernet, reversible, key derived
+# via HKDF from settings.pin_encryption_key ---
 
 
 class EncryptionError(Exception):
@@ -58,7 +29,6 @@ class EncryptionError(Exception):
 def _require_key() -> str:
     raw_key = settings.pin_encryption_key.get_secret_value()
     if not raw_key:
-        # Refuse rather than deriving a guessable key from an empty secret.
         raise EncryptionError(
             "PIN_ENCRYPTION_KEY is not set. Set a strong, unique value before "
             "registering any WhatsApp phone number (its two-step PIN is "
@@ -75,17 +45,12 @@ def _fernet() -> Fernet:
 
 
 def encrypt_secret(plaintext: str) -> str:
-    """Encrypt a short secret (e.g. a 6-digit PIN) for storage at rest."""
+    """Encrypt a short secret (e.g. a PIN) for storage at rest."""
     return _fernet().encrypt(plaintext.encode()).decode()
 
 
 def decrypt_secret(ciphertext: str) -> str:
-    """
-    Decrypt a value produced by encrypt_secret.
-
-    Raises EncryptionError if the ciphertext is invalid or was encrypted
-    with a different PIN_ENCRYPTION_KEY.
-    """
+    """Decrypt a value from encrypt_secret; raises EncryptionError if invalid."""
     try:
         return _fernet().decrypt(ciphertext.encode()).decode()
     except InvalidToken as exc:
@@ -95,47 +60,25 @@ def decrypt_secret(ciphertext: str) -> str:
         ) from exc
 
 
-# ---------------------------------------------------------------------------
-# Password hashing — Argon2id (User.password_hash)
-# ---------------------------------------------------------------------------
-#
-# One-way — we only ever compare, never decrypt. Separate from PIN
-# encryption above, which is symmetric and reversible on purpose.
+# --- Password hashing: Argon2id, one-way (User.password_hash) ---
 
 _password_hasher = PasswordHasher()
 
 
 def hash_password(password: str) -> str:
-    """Hash a plaintext password for storage in User.password_hash."""
+    """Hash a plaintext password for storage."""
     return _password_hasher.hash(password)
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """
-    Check a plaintext password against a stored Argon2 hash.
-
-    Returns False (never raises) on mismatch or a malformed/foreign hash —
-    callers don't need to know which.
-    """
+    """Check a password against an Argon2 hash; False (never raises) on mismatch."""
     try:
         return _password_hasher.verify(password_hash, password)
     except (VerifyMismatchError, VerificationError, InvalidHash):
         return False
 
 
-# ---------------------------------------------------------------------------
-# JWTs — access + refresh tokens
-# ---------------------------------------------------------------------------
-#
-# Signed with settings.secret_key (HS256). Delivered via Bearer header —
-# clients send `Authorization: Bearer <access_token>`; the refresh token is
-# returned once at signup/login/refresh and stored by the client, not a
-# cookie.
-#
-# No revocation store yet: logout is client-side (discard both tokens), and
-# a leaked refresh token stays valid until it expires. Revocation (e.g. a
-# Redis denylist keyed by jti) is a deferred fast-follow, not needed for
-# the initial rollout.
+# --- JWTs: access + refresh tokens, HS256, Bearer delivery ---
 
 JWT_ALGORITHM = "HS256"
 
@@ -192,12 +135,7 @@ def create_refresh_token(*, user_id: str, tenant_id: str) -> str:
 
 
 def decode_token(token: str, *, expected_type: TokenType) -> TokenPayload:
-    """
-    Decode and validate a JWT, checking signature, expiry, and token type.
-
-    Raises TokenError on any problem — callers translate that to a 401
-    (see app.api.dependencies.get_current_user).
-    """
+    """Decode and validate a JWT (signature, expiry, type); raises TokenError."""
     try:
         raw = jwt.decode(
             token, settings.secret_key.get_secret_value(), algorithms=[JWT_ALGORITHM]
@@ -219,31 +157,17 @@ def decode_token(token: str, *, expected_type: TokenType) -> TokenPayload:
     return TokenPayload(user_id=user_id, tenant_id=tenant_id, token_type=token_type)
 
 
-# ---------------------------------------------------------------------------
-# OTP codes — login/signup verification (app/services/otp.py)
-# ---------------------------------------------------------------------------
-#
-# Unrelated to the WhatsApp Cloud API two-step verification PIN above —
-# that PIN gates Meta's phone number registration and is sent *to Meta*;
-# an OTP code is sent *to the user* over WhatsApp to prove they control the
-# number.
+# --- OTP codes: login/signup verification (app/services/otp.py) ---
 
 
 def generate_numeric_code(length: int) -> str:
-    """
-    Generate a random `length`-digit numeric code.
-
-    Uses `secrets` (CSPRNG), not `random` — the code proves phone/account
-    ownership and must not be predictable. Zero-padded to `length` digits.
-    """
+    """Generate a random, zero-padded `length`-digit code using a CSPRNG."""
     upper_bound = 10**length
     return f"{secrets.randbelow(upper_bound):0{length}d}"
 
 
 def hash_otp_code(code: str) -> str:
-    """Hash a code for storage — the plaintext code is sent over WhatsApp
-    and never persisted anywhere, same principle as never storing a
-    plaintext password."""
+    """Hash a code for storage; the plaintext is sent over WhatsApp, never persisted."""
     return hashlib.sha256(code.encode()).hexdigest()
 
 

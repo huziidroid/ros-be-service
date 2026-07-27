@@ -1,16 +1,8 @@
 """
-Tenant repository — async SQLAlchemy implementation.
-
-Methods take an injected AsyncSession; callers commit/rollback after writes.
-
-create_pending() creates the tenant row at signup, before any WhatsApp
-connection exists. attach_waba() is the later, authenticated connect step —
-it updates that same row by tenant_id rather than upserting by waba_id,
-since the row already exists with waba_id still NULL (an ON CONFLICT on
-waba_id would never match it and would insert an orphaned duplicate row
-instead). attach_waba() also pre-checks both waba_id and phone_number_id
-for cross-tenant collisions, so a WABA or number already connected
-elsewhere surfaces as a clean ConflictError instead of a raw IntegrityError.
+Tenant repository — async SQLAlchemy. Methods take an injected AsyncSession;
+callers commit/rollback. create_pending() makes the row at signup; attach_waba()
+later connects a WABA (updating by tenant_id) and rejects cross-tenant
+collisions with ConflictError.
 """
 
 from datetime import UTC, datetime
@@ -30,13 +22,7 @@ class TenantRepo:
         self.session = session
 
     async def create_pending(self, *, display_name: str) -> Tenant:
-        """
-        Create a tenant at signup, before any WhatsApp connection exists.
-
-        Caller must commit the session after calling this method (typically
-        as part of the same transaction that creates the owner User — see
-        app/services/auth.py).
-        """
+        """Create a tenant at signup, before any WhatsApp connection. Caller commits."""
         tenant = Tenant(
             display_name=display_name,
             onboarding_status=OnboardingStatus.NOT_CONNECTED,
@@ -58,14 +44,8 @@ class TenantRepo:
         allocation_config_id: str | None = None,
     ) -> Tenant:
         """
-        Attach a WABA to an existing (signup-created) tenant.
-
-        Caller must commit the session after calling this method.
-
-        Raises ConflictError if the WABA or phone number is already
-        connected to a *different* tenant — pre-checked here, and also
-        guarded against an IntegrityError from a concurrent request racing
-        this one, so the client never sees a raw SQL error.
+        Attach a WABA to an existing tenant. Caller commits. ConflictError if
+        the WABA/number is already connected to a different tenant.
         """
         existing_by_waba = await self.get_by_waba_id(waba_id)
         if existing_by_waba is not None and existing_by_waba.id != tenant_id:
@@ -135,18 +115,10 @@ class TenantRepo:
         )
         return result.scalar_one_or_none()
 
-    # -----------------------------------------------------------------------
-    # Reconciliation — retry queues for the two onboarding steps that are
-    # allowed to fail non-fatally (see app.workflows.tenant_reconciliation)
-    # -----------------------------------------------------------------------
+    # --- Reconciliation: retry queues for non-fatal onboarding steps ---
 
     async def list_needing_credit_share(self) -> list[Tenant]:
-        """
-        Active tenants with a connected WABA whose Solution Partner credit
-        line was never confirmed shared. waba_id IS NOT NULL excludes
-        tenants that signed up but haven't connected WhatsApp yet — there's
-        no WABA to share credit with until they do.
-        """
+        """Active tenants with a connected WABA whose credit line was never confirmed shared."""
         result = await self.session.execute(
             select(Tenant).where(
                 Tenant.waba_id.is_not(None),

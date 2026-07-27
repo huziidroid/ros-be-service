@@ -1,19 +1,8 @@
 """
-Meta WhatsApp Cloud API client — all outbound calls to the Meta Graph API:
-  - Embedded Signup: exchange code → user access token
-  - Assign platform System User to a tenant WABA (grants permanent access)
-  - Fetch WABA accounts and phone numbers for a user token
-  - Fetch a WABA's info via the System User token (reconciliation)
-  - Subscribe this app's webhook to a WABA
-  - Register a tenant's phone number for Cloud API use
-  - Share Retail OS's extended credit line with a tenant's WABA
-  - Send messages (text, template, interactive) on behalf of a tenant
+Meta WhatsApp Cloud API client — outbound Graph API calls.
 
-Sending messages uses settings.whatsapp_system_user_token — a non-expiring
-platform token valid across all tenant WABAs; callers never pass their own.
-
-Non-2xx responses raise WhatsAppAPIError with the raw Meta error body;
-callers translate it to a domain error.
+Message sends use settings.whatsapp_system_user_token (non-expiring, valid
+across all tenant WABAs). Non-2xx responses raise WhatsAppAPIError.
 """
 
 import logging
@@ -28,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class WhatsAppAPIError(Exception):
-    """Raised when Meta Graph API returns a non-2xx response."""
+    """Raised when the Meta Graph API returns a non-2xx response."""
 
     def __init__(self, status_code: int, body: dict[str, Any]) -> None:
         self.status_code = status_code
@@ -51,8 +40,7 @@ def _build_client() -> httpx.AsyncClient:
 def _raise_for_status(response: httpx.Response) -> dict[str, Any]:
     body: dict[str, Any] = response.json()
     if response.is_error:
-        # Log only the path, never the full URL — query strings can carry
-        # access_token/client_secret.
+        # Log only the path — query strings can carry access_token/client_secret.
         error = body.get("error", {}) if isinstance(body, dict) else {}
         logger.error(
             "meta_api_error",
@@ -67,23 +55,11 @@ def _raise_for_status(response: httpx.Response) -> dict[str, Any]:
     return body
 
 
-# ---------------------------------------------------------------------------
-# Embedded Signup — code exchange
-# ---------------------------------------------------------------------------
+# --- Embedded Signup: code exchange ---
 
 
 async def exchange_code_for_token(code: str) -> str:
-    """
-    Exchange a short-lived Embedded Signup code for a user access token.
-
-    Meta endpoint:
-      GET /oauth/access_token
-        ?client_id=APP_ID
-        &client_secret=APP_SECRET
-        &code=CODE
-
-    Returns the access_token string.
-    """
+    """Exchange a short-lived Embedded Signup code for a user access token."""
     async with _build_client() as client:
         response = await client.get(
             "/oauth/access_token",
@@ -99,20 +75,11 @@ async def exchange_code_for_token(code: str) -> str:
     return token
 
 
-# ---------------------------------------------------------------------------
-# WABA and phone number discovery
-# ---------------------------------------------------------------------------
+# --- WABA and phone number discovery ---
 
 
 async def get_waba_accounts(user_token: str) -> list[dict[str, Any]]:
-    """
-    List WhatsApp Business Accounts accessible with the given user token.
-
-    Meta endpoint:
-      GET /me/whatsapp_business_accounts   (token via Authorization header)
-
-    Returns list of {id, name, ...} dicts.
-    """
+    """List WhatsApp Business Accounts accessible with the given user token."""
     async with _build_client() as client:
         response = await client.get(
             "/me/whatsapp_business_accounts",
@@ -126,20 +93,7 @@ async def get_waba_accounts(user_token: str) -> list[dict[str, Any]]:
 
 
 async def get_waba_info(waba_id: str) -> dict[str, Any]:
-    """
-    Fetch a single WABA's info using the platform System User token.
-
-    Used by reconciliation, where the tenant's short-lived Embedded Signup
-    token is long gone — the System User already has MANAGE access (granted
-    during onboarding's assign_system_user step), so no per-tenant token
-    is needed.
-
-    Meta endpoint:
-      GET /{waba_id}?fields=id,name,currency
-        Authorization: Bearer SYSTEM_USER_TOKEN
-
-    Returns {id, name, currency}.
-    """
+    """Fetch a WABA's info via the platform System User token (used by reconciliation)."""
     async with _build_client() as client:
         response = await client.get(
             f"/{waba_id}",
@@ -152,15 +106,7 @@ async def get_waba_info(waba_id: str) -> dict[str, Any]:
 
 
 async def get_phone_numbers(waba_id: str, user_token: str) -> list[dict[str, Any]]:
-    """
-    List phone numbers registered under a WABA.
-
-    Meta endpoint:
-      GET /{waba_id}/phone_numbers   (token via Authorization header)
-        &fields=id,display_phone_number,verified_name,status
-
-    Returns list of {id, display_phone_number, verified_name, status} dicts.
-    """
+    """List phone numbers registered under a WABA."""
     async with _build_client() as client:
         response = await client.get(
             f"/{waba_id}/phone_numbers",
@@ -175,26 +121,11 @@ async def get_phone_numbers(waba_id: str, user_token: str) -> list[dict[str, Any
     return numbers
 
 
-# ---------------------------------------------------------------------------
-# System User assignment
-# ---------------------------------------------------------------------------
+# --- System User assignment ---
 
 
 async def assign_system_user(waba_id: str, user_token: str) -> bool:
-    """
-    Grant the platform System User access to a tenant's WABA. Called once
-    during onboarding, after code exchange — afterward,
-    settings.whatsapp_system_user_token can send on behalf of this WABA
-    indefinitely, no per-tenant token needed.
-
-    Meta endpoint:
-      POST /{waba_id}/assigned_users
-        ?user=SYSTEM_USER_ID
-        &tasks=["MANAGE","DEVELOP"]
-        Authorization: Bearer USER_TOKEN   ← tenant's short-lived Embedded Signup token
-
-    Returns True on success.
-    """
+    """Grant the platform System User permanent access to a tenant's WABA (once, at onboarding)."""
     async with _build_client() as client:
         response = await client.post(
             f"/{waba_id}/assigned_users",
@@ -217,22 +148,11 @@ async def assign_system_user(waba_id: str, user_token: str) -> bool:
     return success
 
 
-# ---------------------------------------------------------------------------
-# Webhook subscription
-# ---------------------------------------------------------------------------
+# --- Webhook subscription ---
 
 
 async def subscribe_webhook(waba_id: str, user_token: str) -> bool:
-    """
-    Subscribe this Meta App to receive webhook events for the given WABA.
-    Called once per WABA after Embedded Signup.
-
-    Meta endpoint:
-      POST /{waba_id}/subscribed_apps
-        Authorization: Bearer USER_TOKEN
-
-    Returns True on success.
-    """
+    """Subscribe this Meta App to webhook events for the given WABA."""
     async with _build_client() as client:
         response = await client.post(
             f"/{waba_id}/subscribed_apps",
@@ -244,9 +164,7 @@ async def subscribe_webhook(waba_id: str, user_token: str) -> bool:
     return success
 
 
-# ---------------------------------------------------------------------------
-# Phone number registration
-# ---------------------------------------------------------------------------
+# --- Phone number registration ---
 
 
 async def register_phone_number(
@@ -254,19 +172,7 @@ async def register_phone_number(
     user_token: str,
     pin: str,
 ) -> bool:
-    """
-    Register a business phone number for Cloud API use — required once per
-    number before it can send/receive messages. `pin` becomes the number's
-    two-step verification PIN; the caller generates and persists it (see
-    app/core/security.generate_numeric_code, app/core/security.encrypt_secret).
-
-    Meta endpoint:
-      POST /{phone_number_id}/register
-        {messaging_product: "whatsapp", pin: PIN}
-        Authorization: Bearer USER_TOKEN   ← the tenant's Embedded Signup token
-
-    Returns True on success.
-    """
+    """Register a phone number for Cloud API use; `pin` becomes its two-step verification PIN."""
     payload = {"messaging_product": "whatsapp", "pin": pin}
     async with _build_client() as client:
         response = await client.post(
@@ -283,27 +189,11 @@ async def register_phone_number(
     return success
 
 
-# ---------------------------------------------------------------------------
-# Solution Partner — credit line sharing
-# ---------------------------------------------------------------------------
+# --- Solution Partner: credit line sharing ---
 
 
 async def share_credit_line(waba_id: str, waba_currency: str) -> dict[str, Any]:
-    """
-    Share Retail OS's extended credit line with a tenant's WABA, so the
-    tenant never adds their own WhatsApp payment method.
-
-    Must run after assign_system_user has granted the System User access to
-    the WABA. Authorized with the platform System User token — this acts on
-    *our* credit line resource, not the tenant's.
-
-    Meta endpoint:
-      POST /{extended_credit_id}/whatsapp_credit_sharing_and_attach
-        {waba_currency: ISO-4217-3 code, waba_id: WABA_ID}
-        Authorization: Bearer SYSTEM_USER_TOKEN
-
-    Returns the raw Meta response: {allocation_config_id, waba_id}.
-    """
+    """Share Retail OS's extended credit line with a tenant's WABA (System User token)."""
     payload = {"waba_currency": waba_currency, "waba_id": waba_id}
     async with _build_client() as client:
         response = await client.post(
@@ -324,9 +214,7 @@ async def share_credit_line(waba_id: str, waba_currency: str) -> dict[str, Any]:
     return data
 
 
-# ---------------------------------------------------------------------------
-# Sending messages
-# ---------------------------------------------------------------------------
+# --- Sending messages ---
 
 
 async def send_text_message(
@@ -336,19 +224,7 @@ async def send_text_message(
     *,
     preview_url: bool = False,
 ) -> dict[str, Any]:
-    """
-    Send a plain text message to a WhatsApp number.
-
-    Uses the platform System User token (settings.whatsapp_system_user_token)
-    which has permanent access to all tenant WABAs.
-
-    Meta endpoint:
-      POST /{phone_number_id}/messages
-        Authorization: Bearer SYSTEM_USER_TOKEN
-
-    `to` must be a full E.164 number without the '+' prefix (e.g. '923001234567').
-    Returns the raw Meta response {messages: [{id}], contacts: [...]}.
-    """
+    """Send a plain text message. `to` is E.164 without the '+' prefix."""
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
@@ -381,19 +257,9 @@ async def send_authentication_template(
     code: str,
 ) -> dict[str, Any]:
     """
-    Send an OTP via an approved AUTHENTICATION-category template with a
-    copy-code button. Unlike free-form text, a template delivers to any
-    recipient without needing an open 24-hour customer-service window.
-
-    Meta requires the code twice: once as the body variable and once as the
-    copy-code button's `coupon_code`.
-
-    Meta endpoint:
-      POST /{phone_number_id}/messages
-        Authorization: Bearer SYSTEM_USER_TOKEN
-
-    `to` must be a full E.164 number without the '+' prefix.
-    Returns the raw Meta response {messages: [{id}], contacts: [...]}.
+    Send an OTP via an approved copy-code AUTHENTICATION template (delivers
+    without a 24h session). Meta requires the code twice: as the body variable
+    and as the copy-code button's `coupon_code`.
     """
     payload = {
         "messaging_product": "whatsapp",
@@ -440,14 +306,7 @@ async def send_interactive_message(
     to: str,
     interactive: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    Send an interactive message (buttons, list, etc.).
-
-    `interactive` is the full Meta interactive object:
-      {type: "button", body: {text: ...}, action: {buttons: [...]}}
-
-    Returns the raw Meta response.
-    """
+    """Send an interactive message; `interactive` is the full Meta interactive object."""
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
@@ -469,13 +328,7 @@ async def mark_message_read(
     phone_number_id: str,
     message_id: str,
 ) -> None:
-    """
-    Mark an inbound message as read (shows blue ticks to sender).
-
-    Meta endpoint:
-      POST /{phone_number_id}/messages
-        {status: "read", message_id: MESSAGE_ID}
-    """
+    """Mark an inbound message as read (blue ticks to the sender)."""
     payload = {
         "messaging_product": "whatsapp",
         "status": "read",

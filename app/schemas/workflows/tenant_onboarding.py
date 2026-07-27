@@ -1,6 +1,4 @@
-"""
-Schemas for TenantOnboardingWorkflow and its activities.
-"""
+"""Schemas for TenantOnboardingWorkflow and its activities."""
 
 from __future__ import annotations
 
@@ -10,15 +8,7 @@ from enum import StrEnum
 from app.schemas.workflows import PhoneNumberInfo, WABAInfo
 
 
-# ---------------------------------------------------------------------------
-# Onboarding status — what state a tenant ended up in after the workflow ran
-# ---------------------------------------------------------------------------
-#
-# Backs Tenant.onboarding_status as a native Postgres enum (see
-# app/models/tenant.py, migration 0004) — fully ours, every value is set by
-# our own code, so no external-vocabulary fallback is needed here (contrast
-# PhoneNumberStatus / MessageDeliveryStatus below and in
-# app/schemas/webhooks/whatsapp.py, which come from Meta).
+# --- Onboarding status: backs Tenant.onboarding_status (native Postgres enum) ---
 
 
 class OnboardingStatus(StrEnum):
@@ -43,18 +33,10 @@ class TenantOnboardingInput:
     """Short-lived code received from Meta after Embedded Signup."""
 
     tenant_id: str
-    """
-    The authenticated caller's tenant (see app/api/v1/auth/whatsapp.py) —
-    WhatsApp connect is an authenticated, optional step performed after
-    signup, so the tenant row already exists. register_tenant attaches the
-    WABA to this row instead of creating a new one.
-    """
+    """The authenticated caller's tenant (already exists) to attach the WABA to."""
 
     preferred_waba_id: str | None = None
-    """
-    WABA ID from the frontend's WA_EMBEDDED_SIGNUP session event, if sent —
-    disambiguates multi-WABA flows instead of taking the first WABA returned.
-    """
+    """WABA ID from the session event; disambiguates multi-WABA flows."""
 
 
 @dataclass
@@ -68,9 +50,7 @@ class TenantOnboardingResult:
     credit_shared: bool = False
 
 
-# ---------------------------------------------------------------------------
-# Activity-level inputs (multi-param activities use a dataclass)
-# ---------------------------------------------------------------------------
+# --- Activity-level inputs (multi-param activities use a dataclass) ---
 
 
 @dataclass
@@ -88,9 +68,7 @@ class FetchPhoneNumbersInput:
 @dataclass
 class AssignSystemUserInput:
     waba_id: str
-    user_token: (
-        str  # short-lived token from Embedded Signup — used once, then discarded
-    )
+    user_token: str  # short-lived Embedded Signup token, used once
 
 
 @dataclass
@@ -103,11 +81,7 @@ class SelectPrimaryWabaInput:
 class RegisterPhoneNumberInput:
     phone_number_id: str
     user_token: str | None = None
-    """
-    Embedded Signup's short-lived token, when called during onboarding. Left
-    None from reconciliation — the activity falls back to the platform
-    System User token, which already has durable WABA access.
-    """
+    """Embedded Signup token; None from reconciliation (falls back to System User)."""
 
 
 @dataclass

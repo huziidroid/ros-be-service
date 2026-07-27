@@ -1,29 +1,8 @@
 """
-TenantOnboardingWorkflow
+TenantOnboardingWorkflow — attaches a WABA to an already-signed-up tenant.
 
-Triggered by: POST /api/v1/auth/whatsapp/callback (authenticated;
-synchronous — caller waits for the result). inp.tenant_id identifies the
-already-signed-up tenant this WABA gets attached to.
-Workflow ID: tenant-onboarding-{code} — prevents double-processing the same
-signup code.
-
-Steps:
-  1. exchange_code          — code → short-lived user access token
-  2. fetch_waba_accounts    — token → all WABAs accessible with it
-  3. select_primary_waba    — choose which WABA (v4 supports multi-WABA flows)
-  4. assign_system_user     — grant the platform System User access; also
-                               required before share_credit_line
-  5. subscribe_waba_webhook — subscribe our webhook to the WABA (non-fatal)
-  6. share_credit_line      — Solution Partner credit share (non-fatal,
-                               retried out-of-band via allocation_config_id)
-  7. fetch_phone_numbers    — fetch phone numbers under the WABA
-  8. register_phone_number  — register the primary number for Cloud API use;
-                               skipped for FINISH_ONLY_WABA signups (no
-                               phone chosen — a documented success case)
-     send_test_message      — optional post-registration smoke test
-                               (non-fatal, skipped if no recipient configured)
-  9. register_tenant        — attach WABA to the caller's (already-signed-up)
-                               tenant; user token discarded after this
+Triggered synchronously by POST /api/v1/auth/whatsapp/callback. Workflow ID
+tenant-onboarding-{code} prevents double-processing a single-use signup code.
 """
 
 from datetime import timedelta
@@ -71,9 +50,7 @@ _SUBSCRIBE_RETRY = RetryPolicy(
     maximum_attempts=2,
     initial_interval=timedelta(seconds=1),
 )
-# Meta Embedded Signup codes are single-use — retrying a spent code always fails.
-# If the activity fails after the Meta call succeeds but before Temporal persists
-# the result, we want the workflow to fail fast (not retry with the same dead code).
+# Meta signup codes are single-use — fail fast, never retry a spent code.
 _NO_RETRY = RetryPolicy(maximum_attempts=1)
 
 
@@ -105,8 +82,7 @@ class TenantOnboardingWorkflow:
                 non_retryable=True,
             )
 
-        # 3. Choose which WABA — v4 can return more than one; prefer the one
-        # the frontend captured from its WA_EMBEDDED_SIGNUP session event.
+        # 3. Choose which WABA (prefer the one the frontend captured).
         primary_waba = await workflow.execute_activity(
             select_primary_waba,
             SelectPrimaryWabaInput(
@@ -117,9 +93,7 @@ class TenantOnboardingWorkflow:
             retry_policy=_RETRY,
         )
 
-        # 4. Grant the platform System User access to this WABA — after
-        # this, settings.whatsapp_system_user_token can send on its behalf.
-        # Required before share_credit_line (6).
+        # 4. Grant the platform System User access (required before step 6).
         await workflow.execute_activity(
             assign_system_user,
             AssignSystemUserInput(waba_id=primary_waba.id, user_token=user_token),
@@ -141,10 +115,7 @@ class TenantOnboardingWorkflow:
                 extra={"waba_id": primary_waba.id},
             )
 
-        # 6. Share our Solution Partner credit line — non-fatal. The activity
-        # already swallows Meta API errors and returns None; this try/except
-        # only guards activity-level failures like a timeout.
-        # allocation_config_id stays unset until retried if this fails.
+        # 6. Share our Solution Partner credit line — non-fatal.
         allocation_config_id: str | None = None
         try:
             allocation_config_id = await workflow.execute_activity(
@@ -170,10 +141,8 @@ class TenantOnboardingWorkflow:
             retry_policy=_RETRY,
         )
 
-        # 8. Register the primary phone number, if one was chosen.
-        # FINISH_ONLY_WABA is a documented success case with no phone number
-        # — we register the tenant anyway; onboarding_status tells the
-        # frontend what happened.
+        # 8. Register the primary phone number, if one was chosen
+        # (FINISH_ONLY_WABA has none — still a success; status reflects it).
         primary_number = all_phone_numbers[0] if all_phone_numbers else None
         onboarding_status = OnboardingStatus.WABA_ONLY
         two_step_pin_encrypted: str | None = None
