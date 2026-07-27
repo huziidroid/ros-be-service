@@ -1,4 +1,4 @@
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -108,7 +108,7 @@ class Settings(BaseSettings):
         mode="after",
     )
     @classmethod
-    def _reject_empty_secret(cls, value: SecretStr, info) -> SecretStr:
+    def _reject_empty_secret(cls, value: SecretStr, info: ValidationInfo) -> SecretStr:
         # Fail loudly at startup rather than deep inside a request (e.g. an
         # empty SECRET_KEY only surfaces as "HMAC key must not be empty" when
         # signing a token).
