@@ -1,24 +1,19 @@
 """
-WhatsApp webhook handler (thin router).
+WhatsApp webhook handlers.
 
 GET  /webhooks/whatsapp — Meta's one-time verification handshake.
 POST /webhooks/whatsapp — inbound events (messages + delivery statuses).
 
-  - GET compares hub.verify_token against settings.whatsapp_webhook_secret.
-  - POST verifies X-Hub-Signature-256 using settings.whatsapp_app_secret, not
-    the verify token.
-  - Malformed/unmodeled payloads are acked with 200, never 500, so Meta
-    doesn't retry forever.
-  - Tenant lookup + workflow fan-out live in services/intake.ingest_webhook;
-    the router only verifies, parses, and delegates.
-
-GET returns a raw PlainTextResponse (Meta requires the bare hub.challenge) —
-the one exception to the APIResponse envelope used everywhere else.
+Decorator-free; the route table lives in `router.py`. GET returns a raw
+PlainTextResponse (Meta requires the bare hub.challenge) — the one exception to
+the APIResponse envelope used everywhere else. Tenant lookup + workflow fan-out
+live in services/intake.ingest_webhook; these handlers only verify, parse, and
+delegate.
 """
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import ValidationError
 
@@ -32,15 +27,7 @@ from app.services.intake import ingest_webhook
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/whatsapp", tags=["WhatsApp Webhooks"])
 
-
-# ---------------------------------------------------------------------------
-# GET — Meta webhook verification
-# ---------------------------------------------------------------------------
-
-
-@router.get("")
 async def verify_webhook(
     hub_mode: str = Query(alias="hub.mode"),
     hub_challenge: str = Query(alias="hub.challenge"),
@@ -59,12 +46,6 @@ async def verify_webhook(
     return PlainTextResponse(content=hub_challenge)
 
 
-# ---------------------------------------------------------------------------
-# POST — Inbound events
-# ---------------------------------------------------------------------------
-
-
-@router.post("", response_model=APIResponse[WebhookAckData])
 async def whatsapp_webhook(
     request: Request,
     temporal: TemporalDep,

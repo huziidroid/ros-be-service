@@ -7,9 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.exception_handlers import register_exception_handlers
-from app.api.rate_limit import limiter
 from app.api.router import api_router
 from app.core.logger import configure_logging
+from app.core.rate_limit import limiter
 from app.core.settings import settings
 
 

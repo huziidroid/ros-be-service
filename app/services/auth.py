@@ -41,13 +41,17 @@ from app.core.settings import settings
 from app.models.user import User
 from app.repositories.tenant_repo import TenantRepo
 from app.repositories.user_repo import UserRepo
-from app.schemas.auth import AuthResult, TokenPair, UserSummary
-from app.schemas.auth.email import (
+from app.schemas.auth import (
+    AuthResult,
     EmailLoginRequestBody,
     EmailSignupRequestBody,
+    OtpRequestBody,
+    OtpRequestedData,
+    OtpVerifyRequestBody,
     RefreshRequestBody,
+    TokenPair,
+    UserSummary,
 )
-from app.schemas.auth.otp import OtpRequestBody, OtpRequestedData, OtpVerifyRequestBody
 from app.services import otp
 from app.services.otp import PendingSignup
 
