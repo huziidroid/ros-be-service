@@ -4,7 +4,7 @@ See app/services/auth.py for how a given phone number is routed to a
 signup or a login without the client declaring which.
 """
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Request, Response, status
 
 from app.api.dependencies import RedisDep, SessionDep
 from app.api.rate_limit import limiter
@@ -33,6 +33,7 @@ router = APIRouter(prefix="/otp", tags=["Auth"])
 @limiter.limit(settings.rate_limit_otp_request)
 async def request(
     request: Request,  # noqa: ARG001 — required by slowapi's Limiter.limit
+    response: Response,  # noqa: ARG001 — slowapi injects X-RateLimit-* headers here
     body: OtpRequestBody,
     session: SessionDep,
     redis: RedisDep,

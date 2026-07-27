@@ -69,8 +69,9 @@ async def request_otp(
     pending: PendingSignup | None = None,
 ) -> None:
     """
-    Generate a code, store its hash (+ any pending signup data) in Redis,
-    and send it to the user over WhatsApp.
+    Generate a code, send it to the user over WhatsApp, then store its hash
+    (+ any pending signup data) in Redis. Sending first means a delivery
+    failure persists nothing, so the user isn't throttled without a code.
 
     Raises RateLimitedError if called again before the resend cooldown
     (settings.otp_resend_cooldown_seconds) elapses for this phone number.
@@ -87,6 +88,18 @@ async def request_otp(
         pending=asdict(pending) if pending is not None else None,
     )
 
+    # Send first: if WhatsApp delivery fails this raises before anything is
+    # persisted, so the user isn't throttled with no code and can retry.
+    # phone_number is our stored/display E.164 format (leading '+'); the
+    # Cloud API `to` field wants it without the '+'.
+    minutes = settings.otp_expire_seconds // 60
+    await send_text_message(
+        phone_number_id=settings.whatsapp_otp_sender_phone_number_id,
+        to=phone_number.lstrip("+"),
+        body=f"Your Retail OS verification code is {code}. It expires in "
+        f"{minutes} minute{'s' if minutes != 1 else ''}.",
+    )
+
     await redis.set(
         _otp_key(phone_number),
         json.dumps(asdict(record)),
@@ -96,16 +109,6 @@ async def request_otp(
         _cooldown_key(phone_number),
         "1",
         ex=settings.otp_resend_cooldown_seconds,
-    )
-
-    # phone_number is our stored/display E.164 format (leading '+'); the
-    # Cloud API `to` field wants it without the '+'.
-    minutes = settings.otp_expire_seconds // 60
-    await send_text_message(
-        settings.whatsapp_otp_sender_phone_number_id,
-        phone_number.lstrip("+"),
-        f"Your Retail OS verification code is {code}. It expires in "
-        f"{minutes} minute{'s' if minutes != 1 else ''}.",
     )
     logger.info("otp_requested")
 

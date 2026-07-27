@@ -2,7 +2,7 @@
 Email + password signup/login, token refresh, and the current-user lookup.
 """
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Request, Response, status
 
 from app.api.dependencies import CurrentUserDep, SessionDep
 from app.api.rate_limit import limiter
@@ -29,6 +29,7 @@ router = APIRouter(tags=["Auth"])
 @limiter.limit(settings.rate_limit_email_signup)
 async def signup(
     request: Request,  # noqa: ARG001 — required by slowapi's Limiter.limit
+    response: Response,  # noqa: ARG001 — slowapi injects X-RateLimit-* headers here
     body: EmailSignupRequestBody,
     session: SessionDep,
 ) -> APIResponse[AuthResult]:
@@ -45,6 +46,7 @@ async def signup(
 @limiter.limit(settings.rate_limit_email_login)
 async def login(
     request: Request,  # noqa: ARG001 — required by slowapi's Limiter.limit
+    response: Response,  # noqa: ARG001 — slowapi injects X-RateLimit-* headers here
     body: EmailLoginRequestBody,
     session: SessionDep,
 ) -> APIResponse[AuthResult]:

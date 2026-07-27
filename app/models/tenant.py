@@ -74,7 +74,14 @@ class Tenant(Base):
 
     # Onboarding state
     onboarding_status: Mapped[OnboardingStatus] = mapped_column(
-        SAEnum(OnboardingStatus, name="onboarding_status"),
+        SAEnum(
+            OnboardingStatus,
+            name="onboarding_status",
+            # Bind the enum's lowercase .value ("not_connected"), matching the
+            # Postgres type's labels — without this SQLAlchemy binds the member
+            # name ("NOT_CONNECTED") and the insert fails.
+            values_callable=lambda enum: [member.value for member in enum],
+        ),
         nullable=False,
         default=OnboardingStatus.NOT_CONNECTED,
         server_default=OnboardingStatus.NOT_CONNECTED.value,

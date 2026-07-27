@@ -43,8 +43,7 @@ class Settings(BaseSettings):
         alias="RECONCILIATION_INTERVAL_MINUTES",
     )
 
-    # WhatsApp (Meta Cloud API, Solution Partner — Retail OS shares its own
-    # credit line with each tenant's WABA)
+    # WhatsApp
     whatsapp_api_url: str = Field(
         default="https://graph.facebook.com",
         alias="WHATSAPP_API_URL",
@@ -99,6 +98,23 @@ class Settings(BaseSettings):
     # Separate from secret_key — derives the Fernet key that encrypts
     # WhatsApp two-step PINs at rest (app/core/security.py).
     pin_encryption_key: SecretStr = Field(alias="PIN_ENCRYPTION_KEY")
+
+    @field_validator(
+        "secret_key",
+        "pin_encryption_key",
+        "whatsapp_app_secret",
+        "whatsapp_webhook_secret",
+        "whatsapp_system_user_token",
+        mode="after",
+    )
+    @classmethod
+    def _reject_empty_secret(cls, value: SecretStr, info) -> SecretStr:
+        # Fail loudly at startup rather than deep inside a request (e.g. an
+        # empty SECRET_KEY only surfaces as "HMAC key must not be empty" when
+        # signing a token).
+        if not value.get_secret_value().strip():
+            raise ValueError(f"{info.field_name} must be set and non-empty")
+        return value
 
     # OTP (login/signup verification codes — see app/core/security.py,
     # app/services/otp.py). All ephemeral state lives in Redis, keyed by
