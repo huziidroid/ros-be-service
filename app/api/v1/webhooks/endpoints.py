@@ -18,8 +18,8 @@ from fastapi.responses import PlainTextResponse
 from pydantic import ValidationError
 
 from app.api.dependencies import SessionDep, TemporalDep
+from app.core.security import verify_signature
 from app.core.settings import settings
-from app.domain.webhook import verify_signature
 from app.schemas.response import APIResponse, ok
 from app.schemas.webhooks.whatsapp import WebhookAckData, WhatsAppWebhookPayload
 from app.services.intake import ingest_webhook

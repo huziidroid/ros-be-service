@@ -21,16 +21,18 @@ async def log_message(inp: MessageIntakeInput) -> None:
     """Emit a structured log event for the inbound message."""
     # Do NOT log message content (text_body) or the raw sender number at INFO —
     # that is customer PII / business data. Log identifiers and metadata only.
+    message = inp.message
+    text_body = message.text_body
     logger.info(
         "message_intake_activity",
         extra={
-            "wamid": inp.wamid,
-            "message_type": inp.message_type,
+            "wamid": message.id,
+            "message_type": message.type,
             "phone_number_id": inp.phone_number_id,
-            "has_text": inp.text_body is not None,
-            "text_len": len(inp.text_body) if inp.text_body else 0,
-            "has_media": inp.media_id is not None,
-            "timestamp": inp.timestamp,
+            "has_text": text_body is not None,
+            "text_len": len(text_body) if text_body else 0,
+            "has_media": message.media_id is not None,
+            "timestamp": message.timestamp,
             "tenant_waba_id": inp.tenant_waba_id,
         },
     )

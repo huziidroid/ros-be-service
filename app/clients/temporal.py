@@ -24,6 +24,7 @@ from temporalio.client import (
     SchedulePolicy,
     ScheduleSpec,
 )
+from temporalio.contrib.pydantic import pydantic_data_converter
 
 from app.core.settings import settings
 
@@ -46,6 +47,7 @@ async def connect_temporal() -> Client | None:
         client = await Client.connect(
             settings.temporal_host,
             namespace=settings.temporal_namespace,
+            data_converter=pydantic_data_converter,
         )
         logger.info("temporal_connected")
         return client
