@@ -13,9 +13,10 @@ from temporalio.client import Client
 
 from app.clients.redis import RedisClient, get_redis_client
 from app.core.database import get_session
-from app.core.security import TokenError, decode_token
+from app.core.security import decode_token
 from app.models.user import User
 from app.repositories.user_repo import UserRepo
+from app.schemas.auth import TokenError
 
 
 def get_temporal_client(request: Request) -> Client:

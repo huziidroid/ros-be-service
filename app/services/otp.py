@@ -18,16 +18,10 @@ from app.clients.whatsapp import send_authentication_template, send_text_message
 from app.core.exceptions import RateLimitedError, UnprocessableError
 from app.core.security import generate_numeric_code, hash_otp_code, verify_otp_code
 from app.core.settings import settings
+from app.schemas.auth import PendingSignup
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class PendingSignup:
-    business_name: str
-    first_name: str
-    last_name: str
 
 
 @dataclass

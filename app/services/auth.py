@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.redis import RedisClient
 from app.core.exceptions import ConflictError, UnauthorizedError, UnprocessableError
 from app.core.security import (
-    TokenError,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -32,12 +31,13 @@ from app.schemas.auth import (
     OtpRequestBody,
     OtpRequestedData,
     OtpVerifyRequestBody,
+    PendingSignup,
     RefreshRequestBody,
+    TokenError,
     TokenPair,
     UserSummary,
 )
 from app.services import otp
-from app.services.otp import PendingSignup
 
 
 logger = logging.getLogger(__name__)

@@ -4,9 +4,7 @@ import base64
 import hashlib
 import hmac
 import secrets
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
 
 import jwt
 from argon2 import PasswordHasher
@@ -16,6 +14,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from app.core.settings import settings
+from app.schemas.auth import TokenError, TokenPayload, TokenType
 
 
 # --- PIN encryption (WhatsApp two-step PIN): Fernet, reversible, key derived
@@ -79,21 +78,9 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 # --- JWTs: access + refresh tokens, HS256, Bearer delivery ---
+# TokenError/TokenPayload/TokenType live in app.schemas.auth.
 
 JWT_ALGORITHM = "HS256"
-
-TokenType = Literal["access", "refresh"]
-
-
-class TokenError(Exception):
-    """Raised when a token is missing, malformed, expired, or the wrong type."""
-
-
-@dataclass
-class TokenPayload:
-    user_id: str
-    tenant_id: str
-    token_type: TokenType
 
 
 def _create_token(
