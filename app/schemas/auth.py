@@ -1,12 +1,39 @@
 """Auth schemas: shared token/user types and the email/OTP/Embedded-Signup bodies."""
 
 import re
+from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.workflows import PhoneNumberStatus
 from app.schemas.workflows.tenant_onboarding import OnboardingStatus
+
+
+# --- Token/OTP primitives (app.core.security, app.services.otp callers) ---
+
+TokenType = Literal["access", "refresh"]
+
+
+class TokenError(Exception):
+    """Raised when a token is missing, malformed, expired, or the wrong type."""
+
+
+@dataclass
+class TokenPayload:
+    user_id: str
+    tenant_id: str
+    token_type: TokenType
+
+
+@dataclass
+class PendingSignup:
+    """Name fields captured at OTP signup, carried until the code is verified."""
+
+    business_name: str
+    first_name: str
+    last_name: str
 
 
 # --- Shared: returned by every signup/login endpoint ---
