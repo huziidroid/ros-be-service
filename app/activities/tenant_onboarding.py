@@ -64,9 +64,31 @@ async def fetch_waba_accounts(user_token: str) -> list[WABAInfo]:
 @activity.defn
 async def select_primary_waba(inp: SelectPrimaryWabaInput) -> WABAInfo:
     """Choose which WABA to onboard (pure selection; supports multi-WABA flows)."""
-    from app.domain.onboarding import select_primary_waba as _select
+    if not inp.waba_accounts:
+        raise ValueError("select_primary_waba called with an empty list.")
 
-    return _select(inp.waba_accounts, inp.preferred_waba_id)
+    if inp.preferred_waba_id is not None:
+        for waba in inp.waba_accounts:
+            if waba.id == inp.preferred_waba_id:
+                return waba
+        logger.warning(
+            "preferred_waba_id_not_found",
+            extra={
+                "preferred_waba_id": inp.preferred_waba_id,
+                "available_ids": [w.id for w in inp.waba_accounts],
+            },
+        )
+
+    if len(inp.waba_accounts) > 1:
+        logger.warning(
+            "ambiguous_multi_waba_selection",
+            extra={
+                "selected_id": inp.waba_accounts[0].id,
+                "available_ids": [w.id for w in inp.waba_accounts],
+            },
+        )
+
+    return inp.waba_accounts[0]
 
 
 @activity.defn
