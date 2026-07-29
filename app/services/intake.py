@@ -14,9 +14,11 @@ from temporalio.client import Client
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from app.core.settings import settings
-from app.domain.webhook import extract_messages
 from app.repositories.tenant_repo import TenantRepo
-from app.schemas.webhooks.whatsapp import WhatsAppWebhookPayload
+from app.schemas.webhooks.whatsapp import (
+    InboundMessage,
+    WhatsAppWebhookPayload,
+)
 from app.schemas.workflows.message_intake import MessageIntakeInput
 from app.workflows.message_intake import MessageIntakeWorkflow
 
@@ -37,22 +39,58 @@ async def ingest_webhook(
     unknown phone_number_ids are logged and dropped. Known-tenant workflow
     starts are issued concurrently.
     """
-    messages = extract_messages(event)
+    messages = _extract_messages(event)
     if not messages:
         return 0
 
+    workflow_inputs = await _resolve_workflow_inputs(session, messages)
+
+    results = await asyncio.gather(
+        *[_start_message_intake(temporal, inp) for inp in workflow_inputs]
+    )
+    return sum(results)
+
+
+def _extract_messages(
+    event: WhatsAppWebhookPayload,
+) -> list[tuple[str, InboundMessage]]:
+    """
+    Flatten inbound messages out of the nested Meta envelope into
+    (phone_number_id, message) tuples. Status changes and unknown fields
+    are silently skipped.
+    """
+    result: list[tuple[str, InboundMessage]] = []
+    for entry in event.entry:
+        for change in entry.changes:
+            if change.field != "messages":
+                continue
+            if not change.value.messages:
+                continue
+            phone_number_id = change.value.metadata.phone_number_id
+            for msg in change.value.messages:
+                result.append((phone_number_id, msg))
+    return result
+
+
+async def _resolve_workflow_inputs(
+    session: AsyncSession,
+    messages: list[tuple[str, InboundMessage]],
+) -> list[MessageIntakeInput]:
+    """
+    Resolve each (phone_number_id, message) pair to its tenant, deduplicating
+    lookups per phone_number_id. Messages for unknown phone_number_ids are
+    logged and dropped.
+    """
     repo = TenantRepo(session)
-    tenant_cache: dict[
-        str, str | None
-    ] = {}  # phone_number_id -> waba_id | None (unknown tenant)
+    waba_id_cache: dict[str, str | None] = {}  # phone_number_id -> waba_id | None
     workflow_inputs: list[MessageIntakeInput] = []
 
     for phone_number_id, message in messages:
-        if phone_number_id not in tenant_cache:
+        if phone_number_id not in waba_id_cache:
             tenant = await repo.get_by_phone_number_id(phone_number_id)
-            tenant_cache[phone_number_id] = tenant.waba_id if tenant else None
+            waba_id_cache[phone_number_id] = tenant.waba_id if tenant else None
 
-        tenant_waba_id = tenant_cache[phone_number_id]
+        tenant_waba_id = waba_id_cache[phone_number_id]
         if tenant_waba_id is None:
             logger.warning(
                 "webhook_unknown_tenant",
@@ -62,24 +100,16 @@ async def ingest_webhook(
 
         workflow_inputs.append(
             MessageIntakeInput(
-                wamid=message.id,
-                wa_id=message.from_,
-                message_type=message.type,
                 phone_number_id=phone_number_id,
-                text_body=message.text_body,
-                media_id=message.media_id,
-                timestamp=message.timestamp,
                 tenant_waba_id=tenant_waba_id,
+                message=message,
             )
         )
 
-    results = await asyncio.gather(
-        *[start_message_intake(temporal, inp) for inp in workflow_inputs]
-    )
-    return sum(results)
+    return workflow_inputs
 
 
-async def start_message_intake(
+async def _start_message_intake(
     temporal: Client,
     inp: MessageIntakeInput,
 ) -> bool:
@@ -91,19 +121,19 @@ async def start_message_intake(
         await temporal.start_workflow(
             MessageIntakeWorkflow.run,
             inp,
-            id=f"message-{inp.wamid}",
+            id=f"message-{inp.message.id}",
             task_queue=settings.temporal_task_queue,
         )
         logger.info(
             "message_workflow_started",
             extra={
-                "wamid": inp.wamid,
+                "wamid": inp.message.id,
                 "phone_number_id": inp.phone_number_id,
-                "message_type": inp.message_type,
+                "message_type": inp.message.type,
             },
         )
         return True
     except WorkflowAlreadyStartedError:
         # Meta retried a message we're already processing — safe to ignore.
-        logger.info("message_workflow_deduplicated", extra={"wamid": inp.wamid})
+        logger.info("message_workflow_deduplicated", extra={"wamid": inp.message.id})
         return False

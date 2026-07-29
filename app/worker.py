@@ -17,6 +17,7 @@ import asyncio
 import logging
 
 from temporalio.client import Client
+from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.worker import Worker
 
 from app.activities.message_intake import log_message
@@ -64,6 +65,7 @@ async def main() -> None:
     client = await Client.connect(
         settings.temporal_host,
         namespace=settings.temporal_namespace,
+        data_converter=pydantic_data_converter,
     )
 
     await ensure_reconciliation_schedule(client)
