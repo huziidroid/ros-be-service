@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError
+from app.core.settings import settings
 from app.models.tenant import Tenant
 from app.schemas.workflows.tenant_onboarding import OnboardingStatus
 
@@ -51,7 +52,7 @@ class TenantRepo:
         if existing_by_waba is not None and existing_by_waba.id != tenant_id:
             raise ConflictError(
                 "This WhatsApp Business Account is already connected to "
-                "another Retail OS account."
+                f"another {settings.app_name} account."
             )
 
         if phone_number_id is not None:
@@ -59,7 +60,7 @@ class TenantRepo:
             if existing_by_phone is not None and existing_by_phone.id != tenant_id:
                 raise ConflictError(
                     "This WhatsApp number is already connected to another "
-                    "Retail OS account."
+                    f"{settings.app_name} account."
                 )
 
         values: dict[str, object] = {
@@ -85,7 +86,7 @@ class TenantRepo:
         except IntegrityError as exc:
             raise ConflictError(
                 "This WhatsApp Business Account or number is already "
-                "connected to another Retail OS account.",
+                f"connected to another {settings.app_name} account.",
                 internal_detail=str(exc),
             ) from exc
         return result.scalar_one()

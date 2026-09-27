@@ -4,7 +4,7 @@ Shared workflow value types.
 Types used across multiple workflows live here.
 Workflow-specific inputs/outputs live in their own module:
   app.schemas.workflows.tenant_onboarding
-  app.schemas.workflows.message_intake
+  app.schemas.workflows.conversation
 """
 
 from __future__ import annotations

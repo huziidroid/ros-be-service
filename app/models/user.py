@@ -1,5 +1,5 @@
 """
-User model — a person who can sign in to Retail OS.
+User model — a person who can sign in to the platform.
 
 Every user belongs to exactly one tenant (owner, created together with the
 Tenant at signup — see app/services/auth.py). Sub-user invites (multiple

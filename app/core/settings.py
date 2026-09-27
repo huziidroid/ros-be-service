@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     whatsapp_test_recipient_number: str | None = Field(
         default=None, alias="WHATSAPP_TEST_RECIPIENT_NUMBER"
     )
-    # phone_number_id on Retail OS's own platform WABA — sends login/signup OTPs.
+    # phone_number_id on this platform's own WABA — sends login/signup OTPs.
     whatsapp_otp_sender_phone_number_id: str = Field(
         alias="WHATSAPP_OTP_SENDER_PHONE_NUMBER_ID"
     )
@@ -82,6 +82,29 @@ class Settings(BaseSettings):
     def whatsapp_api_base(self) -> str:
         """Versioned base URL, e.g. https://graph.facebook.com/v25.0."""
         return f"{self.whatsapp_api_url}/{self.whatsapp_api_version}"
+
+    # LLM / agents
+    openai_api_key: SecretStr = Field(alias="OPENAI_API_KEY")
+    openai_default_model: str = Field(
+        default="gpt-4.1-mini", alias="OPENAI_DEFAULT_MODEL"
+    )
+    routing_confidence_threshold: float = Field(
+        default=0.6, alias="ROUTING_CONFIDENCE_THRESHOLD"
+    )
+    routing_use_self_consistency: bool = Field(
+        default=False, alias="ROUTING_USE_SELF_CONSISTENCY"
+    )
+    # Flip manually after running app/agents/eval/test_router.py and finding
+    # ECE > 0.10 — a human decision from an offline batch metric, not something
+    # the code auto-detects per request.
+    routing_memory_turns: int = Field(default=6, alias="ROUTING_MEMORY_TURNS")
+    routing_conversation_idle_minutes: int = Field(
+        default=30, alias="ROUTING_CONVERSATION_IDLE_MINUTES"
+    )
+    routing_conversation_close_days: int = Field(
+        default=7, alias="ROUTING_CONVERSATION_CLOSE_DAYS"
+    )
+    classify_max_intents: int = Field(default=3, alias="CLASSIFY_MAX_INTENTS")
 
     # Security
     secret_key: SecretStr = Field(alias="SECRET_KEY")
@@ -102,6 +125,7 @@ class Settings(BaseSettings):
         "whatsapp_app_secret",
         "whatsapp_webhook_secret",
         "whatsapp_system_user_token",
+        "openai_api_key",
         mode="after",
     )
     @classmethod

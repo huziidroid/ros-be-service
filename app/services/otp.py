@@ -78,8 +78,8 @@ async def request_otp(
         await send_text_message(
             phone_number_id=settings.whatsapp_otp_sender_phone_number_id,
             to=to,
-            body=f"Your Retail OS verification code is {code}. It expires in "
-            f"{minutes} minute{'s' if minutes != 1 else ''}.",
+            body=f"Your {settings.app_name} verification code is {code}. It expires "
+            f"in {minutes} minute{'s' if minutes != 1 else ''}.",
         )
 
     await redis.set(

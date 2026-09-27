@@ -193,7 +193,7 @@ async def register_phone_number(
 
 
 async def share_credit_line(waba_id: str, waba_currency: str) -> dict[str, Any]:
-    """Share Retail OS's extended credit line with a tenant's WABA (System User token)."""
+    """Share the platform's extended credit line with a tenant's WABA (System User token)."""
     payload = {"waba_currency": waba_currency, "waba_id": waba_id}
     async with _build_client() as client:
         response = await client.post(

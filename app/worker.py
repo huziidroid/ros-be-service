@@ -20,7 +20,12 @@ from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.worker import Worker
 
-from app.activities.message_intake import log_message
+from app.activities.conversation import (
+    classify,
+    send_clarify_options,
+    send_whatsapp_reply,
+)
+from app.activities.message_ingestion import extract_text
 from app.activities.tenant_onboarding import (
     assign_system_user,
     exchange_code,
@@ -43,7 +48,7 @@ from app.activities.tenant_reconciliation import (
 from app.clients.temporal import ensure_reconciliation_schedule
 from app.core.logger import configure_logging
 from app.core.settings import settings
-from app.workflows.message_intake import MessageIntakeWorkflow
+from app.workflows.conversation import ConversationWorkflow
 from app.workflows.tenant_onboarding import TenantOnboardingWorkflow
 from app.workflows.tenant_reconciliation import TenantReconciliationWorkflow
 
@@ -76,7 +81,7 @@ async def main() -> None:
         workflows=[
             TenantOnboardingWorkflow,
             TenantReconciliationWorkflow,
-            MessageIntakeWorkflow,
+            ConversationWorkflow,
         ],
         activities=[
             # Tenant onboarding
@@ -96,8 +101,11 @@ async def main() -> None:
             fetch_waba_currency,
             mark_credit_shared,
             mark_phone_registered,
-            # Message intake
-            log_message,
+            # Conversation routing
+            extract_text,
+            classify,
+            send_whatsapp_reply,
+            send_clarify_options,
         ],
     )
 

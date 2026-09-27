@@ -169,7 +169,7 @@ async def register_phone_number(inp: RegisterPhoneNumberInput) -> str:
 
 @activity.defn
 async def share_credit_line(inp: ShareCreditLineInput) -> str | None:
-    """Share Retail OS's credit line; returns allocation_config_id, or None on failure (non-fatal)."""
+    """Share the platform's credit line; returns allocation_config_id, or None on failure (non-fatal)."""
     from app.clients.whatsapp import WhatsAppAPIError
     from app.clients.whatsapp import share_credit_line as _share
 
@@ -198,7 +198,7 @@ async def send_test_message(phone_number_id: str) -> bool:
         await send_text_message(
             phone_number_id,
             settings.whatsapp_test_recipient_number,
-            "Retail OS: this number is registered and ready to send messages.",
+            f"{settings.app_name}: this number is registered and ready to send messages.",
         )
     except WhatsAppAPIError as exc:
         logger.warning(
